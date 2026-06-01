@@ -112,7 +112,9 @@ cleanup() {
     fi
 
     # Remove stale /32 host routes for Cloudflare endpoint (from previous PreUp)
-    ip route show | grep "/32.*via.*${KNOWN_PHYS_GW}" | awk '{print $1}' \
+    # Uses PHYS_GW (detected gateway) instead of hardcoded KNOWN_PHYS_GW
+    # to work correctly on networks with non-192.168.0.x gateways.
+    ip route show | grep "/32.*via.*${PHYS_GW}" | awk '{print $1}' \
         | while read -r r; do
             info "Removing stale host route: $r"
             ip route del "$r" 2>/dev/null || true
@@ -120,9 +122,9 @@ cleanup() {
 
     # Remove stale PostUp exclusion routes (VPN subnet + LAN)
     for subnet in "$KNOWN_VPN_SUBNET" "$KNOWN_PHYS_LAN"; do
-        if ip route show | grep -q "^${subnet}.*via.*${KNOWN_PHYS_GW}"; then
+        if ip route show | grep -q "^${subnet}.*via.*${PHYS_GW}"; then
             info "Removing stale exclusion route: $subnet"
-            ip route del "$subnet" via "$KNOWN_PHYS_GW" 2>/dev/null || true
+            ip route del "$subnet" via "$PHYS_GW" 2>/dev/null || true
         fi
     done
 
@@ -329,10 +331,10 @@ generate_config() {
     # Move to final destination
     step "Moving wgcf files to ${WGCF_FINAL_DIR}"
     mkdir -p "$WGCF_FINAL_DIR"
-    mv -f "$account_file" "${WGCF_FINAL_DIR}/wgcf-account.toml"
-    mv -f "$profile_file"  "${WGCF_FINAL_DIR}/wgcf-profile.conf"
-    chmod 600 "${WGCF_FINAL_DIR}/wgcf-account.toml"
-    chmod 600 "${WGCF_FINAL_DIR}/wgcf-profile.conf"
+    # install -m 600 copies and sets permissions atomically — no race window
+    # where the file exists with default umask permissions before chmod runs.
+    install -m 600 "$account_file" "${WGCF_FINAL_DIR}/wgcf-account.toml"
+    install -m 600 "$profile_file"  "${WGCF_FINAL_DIR}/wgcf-profile.conf"
     success "Files secured in ${WGCF_FINAL_DIR}"
 }
 
@@ -418,15 +420,18 @@ MTU        = 1280
 
 # Split-horizon fix: route Cloudflare's endpoint via physical gateway
 # BEFORE the tunnel comes up — prevents handshake loop.
-PreUp    = ip route add ${endpoint_ip}/32 via ${PHYS_GW} dev ${PHYS_IFACE} 2>/dev/null || true
+# ip route replace is idempotent; no error suppression needed — if this
+# fails the tunnel MUST NOT come up (handshake would loop into itself).
+PreUp    = ip route replace ${endpoint_ip}/32 via ${PHYS_GW} dev ${PHYS_IFACE}
 PostDown = ip route del ${endpoint_ip}/32 via ${PHYS_GW} dev ${PHYS_IFACE} 2>/dev/null || true
 
 # Exclusion routes: keep OpenVPN server traffic and LAN on eth0 directly.
 # Applied after the /1 AllowedIPs routes are active — more specific, they win.
-PostUp   = ip route add ${KNOWN_VPN_SUBNET} via ${PHYS_GW} dev ${PHYS_IFACE} 2>/dev/null || true
+# Using replace for idempotency; errors suppressed (these are nice-to-have).
+PostUp   = ip route replace ${KNOWN_VPN_SUBNET} via ${PHYS_GW} dev ${PHYS_IFACE} 2>/dev/null || true
 PostDown = ip route del ${KNOWN_VPN_SUBNET} via ${PHYS_GW} dev ${PHYS_IFACE} 2>/dev/null || true
 
-PostUp   = ip route add ${KNOWN_PHYS_LAN} via ${PHYS_GW} dev ${PHYS_IFACE} 2>/dev/null || true
+PostUp   = ip route replace ${KNOWN_PHYS_LAN} via ${PHYS_GW} dev ${PHYS_IFACE} 2>/dev/null || true
 PostDown = ip route del ${KNOWN_PHYS_LAN} via ${PHYS_GW} dev ${PHYS_IFACE} 2>/dev/null || true
 
 [Peer]

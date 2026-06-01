@@ -1,0 +1,25 @@
+# WireGuard/WARP secrets — NEVER commit
+/etc/wireguard/wgcf/wgcf-account.toml
+/etc/wireguard/wgcf/wgcf-profile.conf
+wgcf-account.toml
+wgcf-profile.conf
+
+# Configuration files with real data
+*.ovpn
+
+# Logs and temp files
+*.log
+*.tmp
+*.swp
+*~
+
+# System directories
+/var/
+/etc/
+
+# WARP license keys (environment)
+.env
+.env.*
+
+# Test artifacts
+tests/tmp/
