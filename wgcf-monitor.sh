@@ -181,16 +181,21 @@ cmd_stop() {
     local pid; pid=$(cat "$PID_FILE")
     info "Stopping monitor daemon (PID ${pid})..."
 
-    kill "$pid" 2>/dev/null || true
+    # Kill the entire process group (negative PID) so child processes
+    # spawned by trigger_restart (wg-quick, wgcf-run.sh) are also killed.
+    # This prevents orphaned wg-quick processes from lingering.
+    kill -TERM -"$pid" 2>/dev/null || true
     sleep 1
 
-    # Force kill if still alive
+    # Force kill if still alive (also process group)
     if kill -0 "$pid" 2>/dev/null; then
-        kill -9 "$pid" 2>/dev/null || true
+        warn "Monitor did not stop gracefully — force killing..."
+        kill -KILL -"$pid" 2>/dev/null || true
         sleep 1
     fi
 
     rm -f "$PID_FILE"
+    rmdir "/var/run/wgcf-monitor.lock" 2>/dev/null || true
 
     log "Monitor stopped (was PID ${pid})"
     success "Monitor stopped."

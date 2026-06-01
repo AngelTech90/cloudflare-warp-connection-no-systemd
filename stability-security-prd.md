@@ -180,27 +180,27 @@ kill -TERM -$pid   # negative PID = process group
 | `wgcf-run.sh` | 259 | Daily tunnel control (start/stop/restart/status/test) | ✅ Active |
 | `wgcf-monitor.sh` | 248 | Connection monitor daemon (auto-restart on failure) | ✅ Active (fixed C1) |
 
-### 5.2 Bugs Fixed (2026-06-01 Audit)
+### 5.2 Bugs Fixed
 
-| ID | Severity | Description | Fix |
-|----|----------|-------------|-----|
-| C1 | CRITICAL | Monitor daemon never started — `source` killed it via `main()` | Added `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` guard |
-| H2 | HIGH | Route errors swallowed by `2>/dev/null \|\| true` | PreUp: `ip route replace` without suppression |
-| H3 | HIGH | Cleanup used hardcoded `192.168.0.1` instead of detected `PHYS_GW` | Cleanup uses `$PHYS_GW` throughout |
-| M1 | MEDIUM | Permission race window between `mv` and `chmod 600` | `install -m 600` (atomic) |
-| M4 | MEDIUM | TOCTOU race on PID file (check then write) | `mkdir` mutex (atomic check-and-set) |
+| ID | Severity | Description | Fix | Date |
+|----|----------|-------------|-----|------|
+| C1 | CRITICAL | Monitor daemon never started — `source` killed it via `main()` | Added `[[ "${BASH_SOURCE[0]}" == "${0}" ]]` guard | 2026-06-01 |
+| H2 | HIGH | Route errors swallowed by `2>/dev/null \|\| true` | PreUp: `ip route replace` without suppression | 2026-06-01 |
+| H3 | HIGH | Cleanup used hardcoded `192.168.0.1` instead of detected `PHYS_GW` | Cleanup uses `$PHYS_GW` throughout | 2026-06-01 |
+| M1 | MEDIUM | Permission race window between `mv` and `chmod 600` | `install -m 600` (atomic) | 2026-06-01 |
+| M4 | MEDIUM | TOCTOU race on PID file (check then write) | `mkdir` mutex (atomic check-and-set) | 2026-06-01 |
+| F1 | HIGH | No DNS save/restore — resolv.conf could enter mixed state on crash | `save_dns_state()` / `restore_dns_state()` in `wgcf-run.sh` | 2026-06-01 |
+| F2 | HIGH | No kill switch — host traffic could leak on tunnel drop | `enable_kill_switch()` / `disable_kill_switch()` with iptables | 2026-06-01 |
+| F3 | MEDIUM | Monitor `cmd_stop` orphaned child processes (wg-quick) | Process group kill: `kill -TERM -$pid` | 2026-06-01 |
+| F4 | MEDIUM | `/tmp/wgcf-download-$$` predictable filename — symlink race | `mktemp` with trap cleanup | 2026-06-01 |
 
 ### 5.3 Remaining Gaps
 
-| Priority | Gap | Impact |
-|----------|-----|--------|
-| HIGH | DNS save/restore on crash | `/etc/resolv.conf` could enter mixed state |
-| HIGH | Kill switch (iptables per interface) | Host traffic could leak on tunnel drop |
-| MEDIUM | Process group cleanup in monitor stop | Orphaned child processes |
-| MEDIUM | Temp file uses `$$` instead of `mktemp` | `/tmp` symlink race on wgcf download |
-| LOW | Physical interface detection misses `bond*`, `wwan*`, `br*` | Setup fails on uncommon interfaces |
-| LOW | Monitor's `consecutive_failures` counter resets every iteration | No retry threshold logic |
-| LOW | WARP+ license update not validated | Script reports success regardless |
+| Priority | Gap | Impact | Status |
+|----------|-----|--------|--------|
+| LOW | Physical interface detection misses `bond*`, `wwan*`, `br*` | Setup fails on uncommon interfaces | Open |
+| LOW | Monitor's `consecutive_failures` counter resets every iteration | No retry threshold logic | Open |
+| LOW | WARP+ license update not validated | Script reports success regardless | Open |
 
 ---
 

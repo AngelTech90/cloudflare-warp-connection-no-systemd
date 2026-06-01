@@ -256,7 +256,10 @@ install_wgcf() {
         info "Latest release: $url"
     fi
 
-    local tmp_bin="/tmp/wgcf-download-$$"
+    local tmp_bin
+    tmp_bin=$(mktemp /tmp/wgcf-download.XXXXXX)
+    # Ensure cleanup on any exit path
+    trap 'rm -f "$tmp_bin"' RETURN
     info "Downloading wgcf..."
     curl -fsSL --max-time 60 "$url" -o "$tmp_bin"
 

@@ -37,6 +37,60 @@ KNOWN_PHYS_GW="192.168.0.1"
 KNOWN_VPN_SUBNET="10.96.0.0/16"
 KNOWN_PHYS_LAN="192.168.0.0/24"
 
+# ── DNS save/restore ──────────────────────────────────────────────────────────
+DNS_BACKUP="/run/warp-dns-backup.resolv.conf"
+
+save_dns_state() {
+    if [[ -f /etc/resolv.conf ]]; then
+        mkdir -p "$(dirname "$DNS_BACKUP")"
+        cp /etc/resolv.conf "$DNS_BACKUP"
+        info "DNS state saved: $(grep nameserver "$DNS_BACKUP" 2>/dev/null | tr '\n' ' ')"
+    else
+        warn "/etc/resolv.conf not found — skipping DNS backup."
+    fi
+}
+
+restore_dns_state() {
+    if [[ -f "$DNS_BACKUP" ]]; then
+        cp "$DNS_BACKUP" /etc/resolv.conf
+        info "DNS state restored: $(grep nameserver /etc/resolv.conf 2>/dev/null | tr '\n' ' ')"
+        rm -f "$DNS_BACKUP"
+    else
+        warn "No DNS backup found at $DNS_BACKUP — /etc/resolv.conf not restored."
+        # Last-resort fallback: Cloudflare DNS
+        if [[ ! -f /etc/resolv.conf ]] || ! grep -q nameserver /etc/resolv.conf; then
+            echo "nameserver 1.1.1.1" > /etc/resolv.conf
+            info "Fallback: set DNS to 1.1.1.1"
+        fi
+    fi
+}
+
+# ── kill switch ───────────────────────────────────────────────────────────────
+# WARP handshake endpoint: 162.159.192.0/24, UDP port 2408
+# Excludes LAN (192.168.0.0/24) and WARP handshake from the block.
+enable_kill_switch() {
+    info "Enabling kill switch (block non-WARP egress on physical interface)..."
+    iptables -C OUTPUT -o lo -j ACCEPT 2>/dev/null || iptables -A OUTPUT -o lo -j ACCEPT
+    iptables -C OUTPUT -o "$PHYS_IFACE" -p udp --dport 2408 -d 162.159.192.0/24 -j ACCEPT 2>/dev/null \
+        || iptables -A OUTPUT -o "$PHYS_IFACE" -p udp --dport 2408 -d 162.159.192.0/24 -j ACCEPT
+    iptables -C OUTPUT -o "$PHYS_IFACE" -d "$KNOWN_PHYS_LAN" -j ACCEPT 2>/dev/null \
+        || iptables -A OUTPUT -o "$PHYS_IFACE" -d "$KNOWN_PHYS_LAN" -j ACCEPT
+    iptables -C OUTPUT -o "$WARP_IFACE" -j ACCEPT 2>/dev/null \
+        || iptables -A OUTPUT -o "$WARP_IFACE" -j ACCEPT
+    iptables -C OUTPUT -o "$PHYS_IFACE" -j DROP 2>/dev/null \
+        || iptables -A OUTPUT -o "$PHYS_IFACE" -j DROP
+    success "Kill switch active — egress blocked on $PHYS_IFACE except WARP + LAN"
+}
+
+disable_kill_switch() {
+    info "Disabling kill switch..."
+    iptables -D OUTPUT -o "$PHYS_IFACE" -j DROP 2>/dev/null || true
+    iptables -D OUTPUT -o "$WARP_IFACE" -j ACCEPT 2>/dev/null || true
+    iptables -D OUTPUT -o "$PHYS_IFACE" -d "$KNOWN_PHYS_LAN" -j ACCEPT 2>/dev/null || true
+    iptables -D OUTPUT -o "$PHYS_IFACE" -p udp --dport 2408 -d 162.159.192.0/24 -j ACCEPT 2>/dev/null || true
+    success "Kill switch removed."
+}
+
 # ── guards ────────────────────────────────────────────────────────────────────
 require_root() {
     [[ $EUID -eq 0 ]] || die "Run with sudo: sudo $0 $*"
@@ -45,6 +99,15 @@ require_root() {
 require_config() {
     [[ -f "$WARP_CONF" ]] || \
         die "Config not found: ${WARP_CONF}\nRun setup first: sudo ./warp-wgcf-setup.sh"
+}
+
+detect_physical_iface() {
+    PHYS_IFACE=$(ip route show default \
+        | grep -v 'dev tun' \
+        | grep -E 'dev (eth|enp|wlan|wlp|ens|eno|bond|wwan|br|enx)' \
+        | head -1 \
+        | awk '{print $5}')
+    [[ -z "$PHYS_IFACE" ]] && PHYS_IFACE="$KNOWN_PHYS_IFACE"
 }
 
 # ── commands ──────────────────────────────────────────────────────────────────
@@ -59,12 +122,16 @@ cmd_start() {
         exit 0
     fi
 
+    save_dns_state
+    detect_physical_iface
+
     wg-quick up "$WARP_IFACE"
     sleep 2
 
     if ip link show "$WARP_IFACE" &>/dev/null; then
         success "Tunnel is up"
         ip addr show "$WARP_IFACE" | grep 'inet ' | while IFS= read -r l; do info "  $l"; done
+        enable_kill_switch
     else
         die "Interface $WARP_IFACE did not come up.\nCheck: dmesg | tail -20"
     fi
@@ -78,6 +145,9 @@ cmd_stop() {
         exit 0
     fi
 
+    detect_physical_iface
+    disable_kill_switch
+
     wg-quick down "$WARP_IFACE"
     sleep 1
 
@@ -86,6 +156,7 @@ cmd_stop() {
         ip link delete "$WARP_IFACE" 2>/dev/null || true
     fi
 
+    restore_dns_state
     success "Tunnel stopped"
 }
 
