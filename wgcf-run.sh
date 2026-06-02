@@ -125,15 +125,18 @@ cmd_start() {
     save_dns_state
     detect_physical_iface
 
-    wg-quick up "$WARP_IFACE"
+    # if/else prevents set -e from killing the script before error handling
+    if ! wg-quick up "$WARP_IFACE"; then
+        die "wg-quick up failed.\nCheck: dmesg | tail -20"
+    fi
     sleep 2
 
     if ip link show "$WARP_IFACE" &>/dev/null; then
         success "Tunnel is up"
-        ip addr show "$WARP_IFACE" | grep 'inet ' | while IFS= read -r l; do info "  $l"; done
+        ip addr show "$WARP_IFACE" | grep 'inet ' | while IFS= read -r l; do info "  $l"; done || true
         enable_kill_switch
     else
-        die "Interface $WARP_IFACE did not come up.\nCheck: dmesg | tail -20"
+        warn "Interface $WARP_IFACE did not appear after wg-quick up.\nCheck: dmesg | tail -20"
     fi
 }
 
@@ -148,7 +151,9 @@ cmd_stop() {
     detect_physical_iface
     disable_kill_switch
 
-    wg-quick down "$WARP_IFACE"
+    # || true ensures restore_dns_state ALWAYS runs — even if wg-quick down fails.
+    # Without this, a failed wg-quick down would leave DNS pointed at 1.1.1.1 forever.
+    wg-quick down "$WARP_IFACE" || true
     sleep 1
 
     if ip link show "$WARP_IFACE" &>/dev/null; then
