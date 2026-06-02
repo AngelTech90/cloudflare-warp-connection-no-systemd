@@ -108,6 +108,9 @@ detect_physical_iface() {
         | head -1 \
         | awk '{print $5}')
     [[ -z "$PHYS_IFACE" ]] && PHYS_IFACE="$KNOWN_PHYS_IFACE"
+    # Prevent set -e from killing the script when the [[ ]] test returns
+    # false (PHYS_IFACE is not empty → condition fails → exit code 1).
+    true
 }
 
 # ── commands ──────────────────────────────────────────────────────────────────
